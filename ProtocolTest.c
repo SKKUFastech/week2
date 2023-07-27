@@ -49,6 +49,7 @@ void FAS_Close(int iBdID);
 int FAS_ServoEnable(int iBdID, bool bOnOff);
 int FAS_MoveOriginSingleAxis(int iBdID);
 int FAS_MoveStop(int iBdID);
+int FAS_EmergencyStop(int iBdID);
 
 /************************************************************************************************************************************
  ***************************GUI 프로그램의 버튼 등 구성요소들에서 사용하는 callback등 여러 함수***********************************************
@@ -286,6 +287,9 @@ static void on_combo_command_changed(GtkComboBox *combo_id, gpointer user_data) 
         else if (g_strcmp0(selected_id, "0x33") == 0) {
             gtk_stack_set_visible_child_name(stk2, "page0");
         }
+        else if (g_strcmp0(selected_id, "0x33") == 0) {
+            gtk_stack_set_visible_child_name(stk2, "page0");
+        }
         else if (g_strcmp0(selected_id, "0x37") == 0) {
             gtk_stack_set_visible_child_name(stk2, "page2");
         }
@@ -444,7 +448,9 @@ int FAS_MoveStop(int iBdID){
 int FAS_MoveOriginSingleAxis(int iBdID){
     buffer[0] = header; buffer[1] = 0x03; buffer[2] = sync_no; buffer[3] = 0x00; buffer[4] = frame_type;
 }
-
+int FAS_EmergencyStop(int iBdID) {
+    buffer[0] = header; buffer[1] = 0x02; buffer[2] = sync_no; buffer[3] = 0x00; buffer[4] = frame_type; 
+}
 
 /************************************************************************************************************************************
  ******************************************************* 편의상 만든 함수 **************************************************************
@@ -482,6 +488,9 @@ void library_interface(){
         case 0x31:
             FAS_MoveStop(0);
             break;
+        case 0x32:
+            FAS_EmergencyStop(0);
+            break;
         case 0x33:
             FAS_MoveOriginSingleAxis(0);
             break;
@@ -512,6 +521,8 @@ char *command_interface(){
             return "FAS_ServoEnable";
         case 0x31:
             return "FAS_MoveStop";
+        case 0x32:
+            return "FAS_EmergencyStop";
         case 0x33:
             return "FAS_MoveOriginSingleAxis";
         default:
