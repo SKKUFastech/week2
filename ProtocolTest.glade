@@ -131,10 +131,19 @@
                         <property name="visible">True</property>
                         <property name="can-focus">False</property>
                         <items>
+                          <item id="0x01" translatable="yes">0x01: FAS_GetSlaveInfo</item>
+                          <item id="0x05" translatable="yes">0x05: FAS_GetMotorInfo</item>
+                          <item id="0x06" translatable="yes">0x06: FAS_GetEncoder</item>
+                          <item id="0x07" translatable="yes">0x07: FAS_GetFirmwareInfo</item>
+                          <item id="0x09" translatable="yes">0x09: FAS_GetSlaveInfoEx</item>
+                          <item id="0x10" translatable="yes">0x10: FAS_SaveAllParameters</item>
                           <item id="0x2A" translatable="yes">0x2A: FAS_ServoEnable</item>
+                          <item id="0x2B" translatable="yes">0x2B: FAS_ServoAlarmReset</item>
+                          <item id="0x2E" translatable="yes">0x2E: FAS_GetAlarmType</item>
                           <item id="0x31" translatable="yes">0x31: FAS_MoveStop</item>
+                          <item id="0x32" translatable="yes">0x32: FAS_EmergencyStop</item>
                           <item id="0x33" translatable="yes">0x33: FAS_MoveOrigin</item>
-                          <item id="0x37" translatable="yes">0x37: FAS_Velocity</item>
+                          <item id="0x37" translatable="yes">0x37: FAS_MoveVelocity</item>
                         </items>
                         <signal name="changed" handler="on_combo_command_changed" swapped="no"/>
                       </object>
@@ -224,6 +233,64 @@
                       <object class="GtkFixed" id="Fixed_0x37">
                         <property name="visible">True</property>
                         <property name="can-focus">False</property>
+                        <child>
+                          <object class="GtkLabel" id="label_command_speed">
+                            <property name="visible">True</property>
+                            <property name="can-focus">False</property>
+                            <property name="label" translatable="yes">Speed:</property>
+                            <attributes>
+                              <attribute name="scale" value="0.90000000000000002"/>
+                            </attributes>
+                          </object>
+                          <packing>
+                            <property name="x">10</property>
+                            <property name="y">5</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkEntry" id="entry_speed">
+                            <property name="width-request">200</property>
+                            <property name="height-request">30</property>
+                            <property name="visible">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="max-length">6</property>
+                            <property name="input-purpose">digits</property>
+                          </object>
+                          <packing>
+                            <property name="x">90</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkLabel" id="label_command_direction">
+                            <property name="visible">True</property>
+                            <property name="can-focus">False</property>
+                            <property name="label" translatable="yes">Direction:</property>
+                            <attributes>
+                              <attribute name="scale" value="0.90000000000000002"/>
+                            </attributes>
+                          </object>
+                          <packing>
+                            <property name="x">10</property>
+                            <property name="y">40</property>
+                          </packing>
+                        </child>
+                        <child>
+                          <object class="GtkComboBoxText" id="combo_direction">
+                            <property name="width-request">200</property>
+                            <property name="height-request">30</property>
+                            <property name="visible">True</property>
+                            <property name="can-focus">False</property>
+                            <items>
+                              <item id="0x00" translatable="yes">0: -Jog</item>
+                              <item id="0x01" translatable="yes">1: +Jog</item>
+                            </items>
+                            <signal name="changed" handler="on_combo_direction_changed" swapped="no"/>
+                          </object>
+                          <packing>
+                            <property name="x">90</property>
+                            <property name="y">35</property>
+                          </packing>
+                        </child>
                       </object>
                       <packing>
                         <property name="name">page2</property>

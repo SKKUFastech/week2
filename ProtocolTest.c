@@ -23,20 +23,23 @@
 #include "ReturnCodes_Define.h"
 
 
-
 /************************************************************************************************************************************
  ********************************나중에 라이브러리로 뺄 FASTECH 라이브러리와 같은 기능의 함수*************************************************
  ************************************************************************************************************************************/
  
 typedef uint8_t BYTE;
+typedef uint32_t DWORD;
+typedef char* LPSTR;
 
 #define BUFFER_SIZE 258
+#define DATA_SIZE 253
 #define PORT 3001 //UDP GUI
 
 int client_socket;
 struct sockaddr_in server_addr;
 
-static BYTE header, sync_no, frame_type, data;
+static BYTE header, sync_no, frame_type;
+static BYTE data[DATA_SIZE];
 static BYTE buffer[BUFFER_SIZE];
 
 char *protocol;
@@ -49,7 +52,16 @@ void FAS_Close(int iBdID);
 int FAS_ServoEnable(int iBdID, bool bOnOff);
 int FAS_MoveOriginSingleAxis(int iBdID);
 int FAS_MoveStop(int iBdID);
+int FAS_MoveVelocity(int iBdID, DWORD IVelocity, int iVelDir);
+int FAS_GetboardInfo(int iBdID, BYTE pType, LPSTR LpBuff, int nBuffSize);
+int FAS_GetMotorInfo(int iBdID, BYTE pType, LPSTR LpBuff, int nBuffSize);
+int FAS_GetEncoder(int iBdID, BYTE pType, LPSTR LpBuff, int nBuffSize);
+int FAS_GetFirmwareInfo(int iBdID, BYTE pType, LPSTR LpBuff, int nBuffSize);
+int FAS_GetSlaveInfoEx(int iBdID, BYTE pType, LPSTR LpBuff, int nBuffSize);
+int FAS_SaveAllParameters(int iBdID);
+int FAS_ServoAlarmReset(int iBdID);
 int FAS_EmergencyStop(int iBdID);
+int FAS_GetAlarmType(int iBdID);
 
 /************************************************************************************************************************************
  ***************************GUI 프로그램의 버튼 등 구성요소들에서 사용하는 callback등 여러 함수***********************************************
@@ -60,6 +72,7 @@ static void on_button_send_clicked(GtkButton *button, gpointer user_data);
 static void on_combo_protocol_changed(GtkComboBoxText *combo_text, gpointer user_data);
 static void on_combo_command_changed(GtkComboBox *combo_id, gpointer user_data);
 static void on_combo_data1_changed(GtkComboBox *combo_id, gpointer user_data);
+static void on_combo_direction_changed(GtkComboBox *combo_id, gpointer user_data);
 
 static void on_check_autosync_toggled(GtkToggleButton *togglebutton, gpointer user_data);
 static void on_check_fastech_toggled(GtkToggleButton *togglebutton, gpointer user_data);
@@ -71,9 +84,11 @@ static void on_check_fastech_toggled(GtkToggleButton *togglebutton, gpointer use
 GtkWidget *text_sendbuffer;
 GtkWidget *text_monitor1;
 GtkWidget *text_monitor2;
+GtkWidget *text_autosync;
 GtkTextBuffer *sendbuffer_buffer;
 GtkTextBuffer *monitor1_buffer;
 GtkTextBuffer *monitor2_buffer;
+GtkTextBuffer *autosync_buffer;
  
 void print_buffer(uint8_t *array, size_t size);
 void library_interface();
@@ -121,6 +136,8 @@ int main(int argc, char *argv[]) {
     monitor2_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_monitor2));
     text_sendbuffer = GTK_WIDGET(gtk_builder_get_object(builder, "text_sendbuffer"));
     sendbuffer_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_sendbuffer));
+    text_autosync = GTK_WIDGET(gtk_builder_get_object(builder, "text_autosync"));
+    autosync_buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_autosync));
     
     // callback 함수 연결, user_data를 빌더로 사용함
     button = gtk_builder_get_object(builder, "button_connect");
@@ -135,13 +152,22 @@ int main(int argc, char *argv[]) {
     g_signal_connect(combo_id, "changed", G_CALLBACK(on_combo_command_changed), stk2);
     combo_id = GTK_COMBO_BOX(gtk_builder_get_object(builder, "combo_data1"));
     g_signal_connect(combo_id, "changed", G_CALLBACK(on_combo_data1_changed), NULL);
+    combo_id = GTK_COMBO_BOX(gtk_builder_get_object(builder, "combo_direction"));
+    g_signal_connect(combo_id, "changed", G_CALLBACK(on_combo_direction_changed), builder);
 
 
     checkbox = gtk_builder_get_object(builder, "check_autosync");
     g_signal_connect(checkbox, "toggled", G_CALLBACK(on_check_autosync_toggled), NULL);
     checkbox = gtk_builder_get_object(builder, "check_fastech");
     g_signal_connect(checkbox, "toggled", G_CALLBACK(on_check_fastech_toggled), NULL);
-
+    
+    char sync_str[4];
+    sprintf(sync_str, "%u", sync_no);
+    
+    gtk_text_buffer_set_text(autosync_buffer, sync_str, -1);
+    
+    GObject *button_send = gtk_builder_get_object(builder, "button_send");
+    gtk_widget_set_sensitive(GTK_WIDGET(button_send), FALSE);
     // Start the GTK main loop
     gtk_main();
 
@@ -158,6 +184,10 @@ static void on_button_connect_clicked(GtkButton *button, gpointer user_data) {
     
     // Get the GtkBuilder object passed as user data
     GtkBuilder *builder = GTK_BUILDER(user_data);
+
+    // Get the label of the button
+    const char *label_text = gtk_button_get_label(button);
+    GObject *button_send = gtk_builder_get_object(builder, "button_send");
 
     // Get the entry widget by its ID
     GtkEntry *entry_ip = GTK_ENTRY(gtk_builder_get_object(builder, "entry_ip"));
@@ -203,23 +233,39 @@ static void on_button_connect_clicked(GtkButton *button, gpointer user_data) {
             g_print("Please enter a valid IP.\n");
     }
         
-    if(strcmp(protocol, "TCP") == 0){
+    // Check the current label and update it accordingly
+    if (strcmp(label_text, "Connect") == 0)
+    {
+        gtk_button_set_label(button, "Disconn");
+        gtk_widget_set_sensitive(GTK_WIDGET(button_send), TRUE);
+        
+        if(strcmp(protocol, "TCP") == 0){
         FAS_ConnectTCP(sb1, sb2, sb3, sb4, 0);
         g_print("Selected Protocol: %s\n", protocol);
+        }
+        else if(strcmp(protocol, "UDP") == 0){
+            FAS_Connect(sb1, sb2, sb3, sb4, 0);
+            g_print("Selected Protocol: %s\n", protocol);
+        }
+        else if(protocol != NULL){
+            g_print("Select Protocol\n");
+        }
     }
-    else if(strcmp(protocol, "UDP") == 0){
-        FAS_Connect(sb1, sb2, sb3, sb4, 0);
-        g_print("Selected Protocol: %s\n", protocol);
-    }
-    else if(protocol != NULL){
-        g_print("Select Protocol\n");
+    else if (strcmp(label_text, "Disconn") == 0)
+    {
+        FAS_Close(0);
+        gtk_button_set_label(button, "Connect");
+        gtk_widget_set_sensitive(GTK_WIDGET(button_send), FALSE);
     }
 }
 
  /**@brief Send버튼의 callback*/
 static void on_button_send_clicked(GtkButton *button, gpointer user_data){
     sync_no++;
+    char sync_str[4];
+    sprintf(sync_str, "%u", sync_no);
     
+    gtk_text_buffer_set_text(autosync_buffer, sync_str, -1);
     library_interface();
     
     int send_result = sendto(client_socket, buffer, buffer[1] + 2, 0, (const struct sockaddr *)&server_addr, sizeof(server_addr)); 
@@ -281,17 +327,11 @@ static void on_combo_command_changed(GtkComboBox *combo_id, gpointer user_data) 
         if (g_strcmp0(selected_id, "0x2A") == 0) {
             gtk_stack_set_visible_child_name(stk2, "page1");
         } 
-        else if (g_strcmp0(selected_id, "0x31") == 0) {
-            gtk_stack_set_visible_child_name(stk2, "page0");
-        }
-        else if (g_strcmp0(selected_id, "0x33") == 0) {
-            gtk_stack_set_visible_child_name(stk2, "page0");
-        }
-        else if (g_strcmp0(selected_id, "0x33") == 0) {
-            gtk_stack_set_visible_child_name(stk2, "page0");
-        }
         else if (g_strcmp0(selected_id, "0x37") == 0) {
             gtk_stack_set_visible_child_name(stk2, "page2");
+        }
+        else{
+            gtk_stack_set_visible_child_name(stk2, "page0");
         }
     }
     
@@ -313,20 +353,20 @@ static void on_combo_command_changed(GtkComboBox *combo_id, gpointer user_data) 
  /**@brief 명령어 콤보박스 combo_data1의 callback*/
 static void on_combo_data1_changed(GtkComboBox *combo_id, gpointer user_data) {
     const gchar *selected_id = gtk_combo_box_get_active_id(combo_id);
-
+    memset(&data, 0, sizeof(data));
     if (selected_id != NULL) {
         g_print("Selected Data: %s\n", selected_id);
         char* endptr;
         unsigned long int value = strtoul(selected_id, &endptr, 16);
         if (*endptr == '\0' && value <= UINT8_MAX) {
-            data = (uint8_t)value;
+            data[0] = (uint8_t)value;
         } else {
             g_print("Invalid input: %s\n", selected_id);
         }
     } else {
         g_print("No item selected.\n");
     }
-    g_print("Converted Data: %X \n", data);
+    g_print("Converted Data: %X \n", data[0]);
 }
 
  /**@brief AutoSync 체크박스의 callback*/
@@ -351,6 +391,40 @@ static void on_check_fastech_toggled(GtkToggleButton *togglebutton, gpointer use
         header = 0x00;
         g_print("USER Protocol header: %X \n",header);
     }
+}
+
+ /**@brief MoveVelocity에서 방향 선택 콤보박스의 callback*/
+static void on_combo_direction_changed(GtkComboBox *combo_id, gpointer user_data) {
+    memset(&data, 0, sizeof(data));
+    // Get the GtkBuilder object passed as user data
+    GtkBuilder *builder = GTK_BUILDER(user_data);
+
+    // Get the entry widget by its ID
+    GtkEntry *entry_speed = GTK_ENTRY(gtk_builder_get_object(builder, "entry_speed"));
+    
+    const gchar *selected_id = gtk_combo_box_get_active_id(combo_id);
+    const gchar *text = gtk_entry_get_text(GTK_ENTRY(entry_speed));
+    
+    int value = atoi(text);
+    
+    for (int i = 0; i < 4; i++) {
+        data[i] = (value >> (8 * i)) & 0xFF;
+    }
+
+    if (selected_id != NULL) {
+        g_print("Selected Data: %s\n", selected_id);
+        char* endptr;
+        unsigned long int value = strtoul(selected_id, &endptr, 16);
+        if (*endptr == '\0' && value <= UINT8_MAX) {
+            data[4] = (uint8_t)value;
+        } else {
+            g_print("Invalid input: %s\n", selected_id);
+        }
+    } else {
+        g_print("No item selected.\n");
+    }
+    print_buffer(data, 5);
+    
 }
 
 
@@ -387,6 +461,7 @@ bool FAS_Connect(BYTE sb1, BYTE sb2, BYTE sb3, BYTE sb4, int iBdID){
     else{
         g_print("Valid address\n");
     }
+    return 0;
 }
 
  /**@brief TCP 연결 시 사용
@@ -419,6 +494,7 @@ bool FAS_ConnectTCP(BYTE sb1, BYTE sb2, BYTE sb3, BYTE sb4, int iBdID){
     else{
         g_print("Connection Success\n");
     }
+    return 0;
 }
 
  /**@brief 연결 해제 시 사용
@@ -427,12 +503,92 @@ void FAS_Close(int iBdID){
     close(client_socket);
 }
 
+ /**@brief 해당보드의 정보
+  * @param int iBdID 드라이브 ID
+  * @param BYTE pType 모터의 Type
+  * @param LPSTR LpBuff Motor정보를 받을 문자열
+  * @param int nBuffSize 버퍼의 사이즈 */
+int FAS_GetboardInfo(int iBdID, BYTE pType, LPSTR LpBuff, int nBuffSize){
+    buffer[0] = header; buffer[1] = 0x03; buffer[2] = sync_no; buffer[3] = 0x00; buffer[4] = frame_type;
+    return 0;
+}
+
+ /**@brief 해당모터의 정보
+  * @param int iBdID 드라이브 ID
+  * @param BYTE pType 모터의 Type
+  * @param LPSTR LpBuff Motor정보를 받을 문자열
+  * @param int nBuffSize 버퍼의 사이즈 */
+int FAS_GetMotorInfo(int iBdID, BYTE pType, LPSTR LpBuff, int nBuffSize){
+    buffer[0] = header; buffer[1] = 0x03; buffer[2] = sync_no; buffer[3] = 0x00; buffer[4] = frame_type;
+    return 0;
+}
+
+ /**@brief 해당엔코더의 정보
+  * @param int iBdID 드라이브 ID
+  * @param BYTE pType 모터의 Type
+  * @param LPSTR LpBuff Motor정보를 받을 문자열
+  * @param int nBuffSize 버퍼의 사이즈 */
+int FAS_GetEncoder(int iBdID, BYTE pType, LPSTR LpBuff, int nBuffSize){
+    buffer[0] = header; buffer[1] = 0x03; buffer[2] = sync_no; buffer[3] = 0x00; buffer[4] = frame_type;
+    return 0;
+}
+
+ /**@brief 펌웨어의 정보
+  * @param int iBdID 드라이브 ID
+  * @param BYTE pType 모터의 Type
+  * @param LPSTR LpBuff Motor정보를 받을 문자열
+  * @param int nBuffSize 버퍼의 사이즈 */
+int FAS_GetFirmwareInfo(int iBdID, BYTE pType, LPSTR LpBuff, int nBuffSize){
+    buffer[0] = header; buffer[1] = 0x03; buffer[2] = sync_no; buffer[3] = 0x00; buffer[4] = frame_type;
+    return 0;
+}
+
+ /**@brief 해당보드의 정보
+  * @param int iBdID 드라이브 ID
+  * @param BYTE pType 모터의 Type
+  * @param LPSTR LpBuff Motor정보를 받을 문자열
+  * @param int nBuffSize 버퍼의 사이즈 */
+int FAS_GetSlaveInfoEx(int iBdID, BYTE pType, LPSTR LpBuff, int nBuffSize){
+    buffer[0] = header; buffer[1] = 0x03; buffer[2] = sync_no; buffer[3] = 0x00; buffer[4] = frame_type;
+    return 0;
+}
+
+ /**@brief 현재까지 수정된 파라미터 값고 입출력 신호를 ROM영역에 저장
+  * @param int iBdID 드라이브 ID*/
+int FAS_SaveAllParameters(int iBdID){
+    buffer[0] = header; buffer[1] = 0x03; buffer[2] = sync_no; buffer[3] = 0x00; buffer[4] = frame_type;
+    return 0;
+}
+
+ /**@brief 비상정지
+  * @param int iBdID 드라이브 ID
+  * @return 명령이 수행된 정보*/
+int FAS_EmergencyStop(int iBdID){
+    buffer[0] = header; buffer[1] = 0x03; buffer[2] = sync_no; buffer[3] = 0x00; buffer[4] = frame_type;
+    return 0;
+}
+
  /**@brief Servo의 상태를 ON/OFF
   * @param int iBdID 드라이브 ID 
   * @param bool bOnOff Enable/Disable
   * @return 명령이 수행된 정보*/
 int FAS_ServoEnable(int iBdID, bool bOnOff){
-    buffer[0] = header; buffer[1] = 0x04; buffer[2] = sync_no; buffer[3] = 0x00; buffer[4] = frame_type; buffer[5] = data;
+    buffer[0] = header; buffer[1] = 0x04; buffer[2] = sync_no; buffer[3] = 0x00; buffer[4] = frame_type; buffer[5] = data[0];
+    return 0;
+}
+
+ /**@brief Alarm Reset명령 보냄
+  * @param int iBdID 드라이브 ID*/
+int FAS_ServoAlarmReset(int iBdID){
+    buffer[0] = header; buffer[1] = 0x03; buffer[2] = sync_no; buffer[3] = 0x00; buffer[4] = frame_type;
+    return 0;
+}
+
+ /**@brief Alarm 정보 요청
+  * @param int iBdID 드라이브 ID*/
+int FAS_GetAlarmType(int iBdID){
+    buffer[0] = header; buffer[1] = 0x03; buffer[2] = sync_no; buffer[3] = 0x00; buffer[4] = frame_type;
+    return 0;
 }
 
  /**@brief Servo를 천천히 멈추는 기능
@@ -440,6 +596,7 @@ int FAS_ServoEnable(int iBdID, bool bOnOff){
   * @return 명령이 수행된 정보*/
 int FAS_MoveStop(int iBdID){
     buffer[0] = header; buffer[1] = 0x03; buffer[2] = sync_no; buffer[3] = 0x00; buffer[4] = frame_type;
+    return 0;
 }
 
  /**@brief 시스템의 원점을 찾는 기능?
@@ -447,11 +604,19 @@ int FAS_MoveStop(int iBdID){
   * @return 명령이 수행된 정보*/
 int FAS_MoveOriginSingleAxis(int iBdID){
     buffer[0] = header; buffer[1] = 0x03; buffer[2] = sync_no; buffer[3] = 0x00; buffer[4] = frame_type;
-}
-int FAS_EmergencyStop(int iBdID) {
-    buffer[0] = header; buffer[1] = 0x02; buffer[2] = sync_no; buffer[3] = 0x00; buffer[4] = frame_type; 
+    return 0;
 }
 
+/**@brief Jog 운전 시작을 요청
+  * @param int iBdID 드라이브 ID
+  * @param DWORD lVelocity 이동 시 속도 값 (pps)
+  * @param int iVelDir 이동할 방향 (0:-Jog, 1:+Jog)
+  * @return 명령이 수행된 정보*/
+int FAS_MoveVelocity(int iBdID, DWORD lVelocity, int iVelDir) {
+    buffer[0] = header; buffer[1] = 0x08; buffer[2] = sync_no; buffer[3] = 0x00; buffer[4] = frame_type;
+    memcpy(&buffer[5], data, sizeof(data));
+    return 0;
+}
 /************************************************************************************************************************************
  ******************************************************* 편의상 만든 함수 **************************************************************
  ************************************************************************************************************************************/
@@ -482,8 +647,32 @@ char* array_to_string(const uint8_t *array, int size) {
 void library_interface(){
     switch(frame_type)
     {
+        case 0x01:
+            FAS_GetboardInfo(0, 0, NULL, 0);
+            break;
+        case 0x05:
+            FAS_GetMotorInfo(0, 0, NULL, 0);
+            break;
+        case 0x06:
+            FAS_GetEncoder(0, 0, NULL, 0);
+            break;
+        case 0x07:
+            FAS_GetFirmwareInfo(0, 0, NULL, 0);
+            break;
+        case 0x09:
+            FAS_ServoEnable(0, 0);
+            break;
+        case 0x10:
+            FAS_SaveAllParameters(0);
+            break;
         case 0x2A:
             FAS_ServoEnable(0, 0);
+            break;
+        case 0x2B:
+            FAS_ServoAlarmReset(0);
+            break;
+        case 0x2E:
+            FAS_GetAlarmType(0);
             break;
         case 0x31:
             FAS_MoveStop(0);
@@ -493,6 +682,9 @@ void library_interface(){
             break;
         case 0x33:
             FAS_MoveOriginSingleAxis(0);
+            break;
+         case 0x37:
+            FAS_MoveVelocity(0, 1000, 0); // 예시로 lVelocity를 1000, iVelDir를 0으로 설정
             break;
     }
     size_t data_size = buffer[1] + 2;
@@ -517,14 +709,32 @@ void library_interface(){
 char *command_interface(){
     switch(frame_type)
     {
+        case 0x01:
+            return"FAS_GetboardInfo";
+        case 0x05:
+            return "FAS_GetMotorInfo";
+        case 0x06:
+            return "FAS_GetEncoder";
+        case 0x07:
+            return "FAS_GetFirmwareInfo";
+        case 0x09:
+            return "FAS_ServoEnable";
+        case 0x10:
+            return "FAS_SaveAllParameters";
         case 0x2A:
             return "FAS_ServoEnable";
+        case 0x2B:
+            return "FAS_ServoAlarmReset";
+        case 0x2E:
+            return "FAS_GetAlarmType";
         case 0x31:
             return "FAS_MoveStop";
         case 0x32:
             return "FAS_EmergencyStop";
         case 0x33:
             return "FAS_MoveOriginSingleAxis";
+         case 0x37:
+            return "FAS_MoveVelocity";
         default:
             return "Transfer Fail";
     }
